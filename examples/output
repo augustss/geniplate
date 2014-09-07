@@ -1,0 +1,33 @@
+./Main
+[12,1,2,345,3,4,5,6]
+[1,2,3,4,5,6]
+[]
+[True,True,True,False,True,False,True,True,False,True,False,False,False,True]
+[Bin (Bin (MT True) 'a' True (MT False)) 'a' False (MT True),Bin (MT True) 'a' True (MT False),MT True,MT False,MT True]
+[[1,2],[2],[]]
+[(True,T {x = 2, y = "a"}),(False,T {x = 3, y = "b"})]
+Bin (Bin (MT False) 'a' False (MT True)) 'a' True (MT False)
+Bin (Bin (MT False) False False (MT True)) False True (MT False)
+Bin (Bin (MT True) 'a' False (MT False)) 'a' True (MT True)
+Just [1,2,3]
+Nothing
+Just [(1,True)]
+3
+3
+Bin (Bin (MT True) 103 True (MT False)) 103 False (MT True)
+True
+True
+True
+False
+True
+False
+True
+Bin (Bin (MT False) False False (MT True)) False True (MT False)
+MT True
+MT False
+Bin (MT True) 'a' True (MT False)
+MT True
+Bin (Bin (MT True) 'a' True (MT False)) 'a' False (MT True)
+Bin (Bin (MT True) 'a' True (MT False)) 'a' False (MT True)
+[()]
+[2,11,101]
