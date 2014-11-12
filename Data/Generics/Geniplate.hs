@@ -1,8 +1,8 @@
 {-# LANGUAGE TemplateHaskell, MultiParamTypeClasses, FlexibleInstances, TypeSynonymInstances, PatternGuards, CPP #-}
 module Data.Generics.Geniplate(
-    genUniverseBi, genUniverseBiT,
-    genTransformBi, genTransformBiT,
-    genTransformBiM, genTransformBiMT,
+    genUniverseBi, genUniverseBi', genUniverseBiT, genUniverseBiT',
+    genTransformBi, genTransformBi', genTransformBiT, genTransformBiT',
+    genTransformBiM, genTransformBiM', genTransformBiMT, genTransformBiMT',
     UniverseBi(..), universe, instanceUniverseBi, instanceUniverseBiT,
     TransformBi(..), transform, instanceTransformBi, instanceTransformBiT,
     TransformBiM(..), transformM, instanceTransformBiM, instanceTransformBiMT,
@@ -126,13 +126,20 @@ genUniverseBi :: Name             -- ^function of type @S -> [T]@
               -> Q Exp
 genUniverseBi = genUniverseBiT []
 
+genUniverseBi' :: TypeQ -> Q Exp
+genUniverseBi' = genUniverseBiT' []
+
 -- | Same as 'genUniverseBi', but does not look inside any types mention in the
 -- list of types.
 genUniverseBiT :: [TypeQ]         -- ^types not touched by 'universeBi'
-               -> Name            -- ^function of type @S -> [T]@
-               -> Q Exp
-genUniverseBiT stops name = do
-    (_tvs, from, tos) <- getNameType name
+                -> Name            -- ^function of type @S -> [T]@
+                -> Q Exp
+genUniverseBiT stops = getNameType >=> genUniverseBiTsplit stops
+
+genUniverseBiT' :: [TypeQ] -> TypeQ -> Q Exp
+genUniverseBiT' stops q = q >>= splitType >>= genUniverseBiTsplit stops
+
+genUniverseBiTsplit stops (_tvs,from,tos) = do
     let to = unList tos
 --    qRunIO $ print (from, to)
     (ds, f) <- uniBiQ stops from to
@@ -325,14 +332,21 @@ getTyConInfo con = do
         PrimTyConI{} -> return ([], [])
         i -> genError $ "unexpected TyCon: " ++ show i
 
+splitType :: (Quasi q) => Type -> q ([TyVarBndr], Type, Type)
+splitType t =
+  case t of
+    (ForallT tvs _ t) -> do
+      (tvs', from, to) <- splitType t
+      return (tvs ++ tvs', from, to)
+    (AppT (AppT ArrowT from) to) -> return ([], from, to)
+    _ -> genError $ "Type is not an arrow: " ++ pprint t
+
+
 getNameType :: (Quasi q) => Name -> q ([TyVarBndr], Type, Type)
 getNameType name = do
     info <- qReify name
-    let split (ForallT tvs _ t) = (tvs ++ tvs', from, to) where (tvs', from, to) = split t
-        split (AppT (AppT ArrowT from) to) = ([], from, to)
-        split t = genError $ "Type is not an arrow: " ++ pprint t
     case info of
-        VarI _ t _ _ -> return $ split t
+        VarI _ t _ _ -> splitType t
         _            -> genError $ "Name is not variable: " ++ pprint name
 
 unList :: Type -> Type
@@ -378,10 +392,16 @@ genTransformBi :: Name       -- ^function of type @(S->S) -> T -> T@
                -> Q Exp
 genTransformBi = genTransformBiT []
 
+genTransformBi' :: TypeQ -> Q Exp
+genTransformBi' = genTransformBiT' []
+
 -- | Same as 'genTransformBi', but does not look inside any types mention in the
 -- list of types.
 genTransformBiT :: [TypeQ] -> Name -> Q Exp
 genTransformBiT = transformBiG raNormal
+
+genTransformBiT' :: [TypeQ] -> TypeQ -> Q Exp
+genTransformBiT' = transformBiG' raNormal
 
 raNormal :: RetAp
 raNormal = (id, AppE, AppE)
@@ -389,8 +409,14 @@ raNormal = (id, AppE, AppE)
 genTransformBiM :: Name -> Q Exp
 genTransformBiM = genTransformBiMT []
 
+genTransformBiM' :: TypeQ -> Q Exp
+genTransformBiM' = genTransformBiMT' []
+
 genTransformBiMT :: [TypeQ] -> Name -> Q Exp
 genTransformBiMT = transformBiG raMonad
+
+genTransformBiMT' :: [TypeQ] -> TypeQ -> Q Exp
+genTransformBiMT' = transformBiG' raMonad
 
 raMonad :: RetAp
 raMonad = (eret, eap, emap)
@@ -401,8 +427,12 @@ raMonad = (eret, eap, emap)
 type RetAp = (Exp -> Exp, Exp -> Exp -> Exp, Exp -> Exp -> Exp)
 
 transformBiG :: RetAp -> [TypeQ] -> Name -> Q Exp
-transformBiG ra stops name = do
-    (_tvs, fcn, res) <- getNameType name
+transformBiG ra stops = getNameType >=> transformBiGsplit ra stops
+
+transformBiG' :: RetAp -> [TypeQ] -> TypeQ -> Q Exp
+transformBiG' ra stops q = q >>= splitType >>= transformBiGsplit ra stops
+
+transformBiGsplit ra stops (_tvs,fcn,res) = do
     f <- newName "_f"
     x <- newName "_x"
     (ds, tr) <-
