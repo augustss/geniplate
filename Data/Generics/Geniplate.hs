@@ -15,7 +15,7 @@ import Control.Monad.State.Strict
 import Data.Maybe
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax hiding (lift)
-import System.IO
+--import System.IO
 
 ---- Overloaded interface, same as Uniplate.
 
@@ -188,6 +188,7 @@ genUniverseBiT stops = getNameType >=> genUniverseBiTsplit stops
 genUniverseBiT' :: [TypeQ] -> TypeQ -> Q Exp
 genUniverseBiT' stops q = q >>= splitType >>= genUniverseBiTsplit stops
 
+genUniverseBiTsplit :: [TypeQ] -> ([TyVarBndr], Type, Type) -> Q Exp
 genUniverseBiTsplit stops (_tvs,from,tos) = do
     let to = unList tos
 --    qRunIO $ print (from, to)
@@ -481,6 +482,7 @@ transformBiG ra stops = getNameType >=> transformBiGsplit MTransformBi ra stops
 transformBiG' :: RetAp -> [TypeQ] -> TypeQ -> Q Exp
 transformBiG' ra stops q = q >>= splitType >>= transformBiGsplit MTransformBi ra stops
 
+transformBiGsplit :: Mode -> RetAp -> [TypeQ] -> (t, Type, Type) -> Q Exp
 transformBiGsplit doDescend ra stops (_tvs,fcn,res) = do
     f <- newName "_f"
     x <- newName "_x"
@@ -603,7 +605,7 @@ trMkArm seenStop doDescend ra@(ret, apl, _) f ft st s c ec ts = do
                 let t' = subst s t
                 tr <- trBi seenStop doDescend ra f ft t'
                 return $ AppE tr (VarE v)
-        conTy = foldr arrow st (map (subst s) ts)
+--        conTy = foldr arrow st (map (subst s) ts)
     es <- zipWithM sub vs ts
     let body = foldl apl (ret ec) es
     return $ Clause [c (map VarP vs)] (NormalB body) []
