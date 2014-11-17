@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, MultiParamTypeClasses, FlexibleInstances, TypeSynonymInstances, PatternGuards, CPP, DoAndIfThenElse #-}
+{-# LANGUAGE TemplateHaskell, MultiParamTypeClasses, FlexibleInstances, FlexibleContexts, TypeSynonymInstances, PatternGuards, CPP, DoAndIfThenElse #-}
 module Data.Generics.Geniplate(
     genUniverseBi, genUniverseBi', genUniverseBiT, genUniverseBiT',
     genTransformBi, genTransformBi', genTransformBiT, genTransformBiT',
@@ -7,11 +7,12 @@ module Data.Generics.Geniplate(
     TransformBi(..), transform, instanceTransformBi, instanceTransformBiT,
     TransformBiM(..), transformM, instanceTransformBiM, instanceTransformBiMT,
     DescendBiM(..), instanceDescendBiM, instanceDescendBiMT,
-    DescendM(..), instanceDescendM, instanceDescendMT,
+    DescendM(..), descend, instanceDescendM, instanceDescendMT,
     ) where
 import Control.Monad
 import Control.Exception(assert)
 import Control.Monad.State.Strict
+import Control.Monad.Identity
 import Data.Maybe
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax hiding (lift)
@@ -47,6 +48,9 @@ transform = transformBi
 
 transformM :: (TransformBiM m a a) => (a -> m a) -> a -> m a
 transformM = transformBiM
+
+descend :: (DescendM Identity a) => (a -> a) -> (a -> a)
+descend f = runIdentity . descendM (return . f)
 
 ----
 
@@ -220,7 +224,7 @@ instance Quasi U where
     qReifyModule = lift . qReifyModule
     qAddTopDecls = lift . qAddTopDecls
     qAddModFinalizer = lift . qAddModFinalizer
-    qGetQ = lift $ qGetQ
+    qGetQ = undefined -- lift . qGetQ
     qPutQ = lift . qPutQ
 #endif
 
