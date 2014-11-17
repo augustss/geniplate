@@ -220,7 +220,7 @@ instance Quasi U where
     qReifyModule = lift . qReifyModule
     qAddTopDecls = lift . qAddTopDecls
     qAddModFinalizer = lift . qAddModFinalizer
-    qGetQ = undefined -- lift . qGetQ
+    qGetQ = lift $ qGetQ
     qPutQ = lift . qPutQ
 #endif
 
