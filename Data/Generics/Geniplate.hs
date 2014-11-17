@@ -215,6 +215,13 @@ instance Quasi U where
 #if __GLASGOW_HASKELL__ >= 708
     qLookupName ns = lift . qLookupName ns
     qAddDependentFile = lift . qAddDependentFile
+    qReifyRoles = lift . qReifyRoles
+    qReifyAnnotations = lift . qReifyAnnotations
+    qReifyModule = lift . qReifyModule
+    qAddTopDecls = lift . qAddTopDecls
+    qAddModFinalizer = lift . qAddModFinalizer
+    qGetQ = undefined -- lift . qGetQ
+    qPutQ = lift . qPutQ
 #endif
 
 uniBiQ :: [TypeQ] -> Type -> Type -> Q ([Dec], Exp)
@@ -502,8 +509,8 @@ trBiQ doDescend ra stops f aft st = do
     (tr, (m, _)) <- runStateT (trBi False doDescend ra (VarE f) ft st) (mEmpty, mFromList $ zip ss (repeat False))
     return (mElems m, tr)
 
-arrow :: Type -> Type -> Type
-arrow t1 t2 = AppT (AppT ArrowT t1) t2
+--arrow :: Type -> Type -> Type
+--arrow t1 t2 = AppT (AppT ArrowT t1) t2
 
 trBi :: Bool -> Mode -> RetAp -> Exp -> Type -> Type -> U Exp
 --trBi True DescendBiM (ret, _, _) _ _ _ = return ret
