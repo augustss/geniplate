@@ -209,16 +209,17 @@ instance Quasi U where
     qReport b = lift . qReport b
     qRecover = error "Data.Generics.Geniplate: qRecover not implemented"
     qReify = lift . qReify
-#if __GLASGOW_HASKELL__ >= 708
+#if __GLASGOW_HASKELL__ >= 706
     qReifyInstances n = lift . qReifyInstances n
 #elif __GLASGOW_HASKELL__ >= 702
     qClassInstances n = lift . qClassInstances n
 #endif
     qLocation = lift qLocation
     qRunIO = lift . qRunIO
-#if __GLASGOW_HASKELL__ >= 708
+#if __GLASGOW_HASKELL__ >= 706
     qLookupName ns = lift . qLookupName ns
     qAddDependentFile = lift . qAddDependentFile
+#if __GLASGOW_HASKELL__ >= 708
     qReifyRoles = lift . qReifyRoles
     qReifyAnnotations = lift . qReifyAnnotations
     qReifyModule = lift . qReifyModule
@@ -226,6 +227,7 @@ instance Quasi U where
     qAddModFinalizer = lift . qAddModFinalizer
     qGetQ = undefined -- lift . qGetQ
     qPutQ = lift . qPutQ
+#endif
 #endif
 
 uniBiQ :: [TypeQ] -> Type -> Type -> Q ([Dec], Exp)
