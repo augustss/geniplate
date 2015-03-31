@@ -2,7 +2,7 @@ Name:           geniplate
 Version:        0.6.0.6
 Synopsis:       Use Template Haskell to generate Uniplate-like functions.
 Description:    Use Template Haskell to generate Uniplate-like functions.
-Bug-reports:    https://github.com/haskell/augustss/geniplate/issues
+Bug-reports:    https://github.com/augustss/geniplate/issues
 License:        BSD3
 License-File:   LICENSE
 Author:         Lennart Augustsson
