@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, MultiParamTypeClasses, FlexibleInstances, TypeSynonymInstances, PatternGuards, CPP #-}
+{-# LANGUAGE TemplateHaskell, MultiParamTypeClasses, FlexibleInstances, FlexibleContexts, TypeSynonymInstances, PatternGuards, CPP, DoAndIfThenElse #-}
 module Data.Generics.Geniplate(
     genUniverseBi, genUniverseBi', genUniverseBiT, genUniverseBiT',
     genTransformBi, genTransformBi', genTransformBiT, genTransformBiT',
@@ -6,14 +6,17 @@ module Data.Generics.Geniplate(
     UniverseBi(..), universe, instanceUniverseBi, instanceUniverseBiT,
     TransformBi(..), transform, instanceTransformBi, instanceTransformBiT,
     TransformBiM(..), transformM, instanceTransformBiM, instanceTransformBiMT,
+    DescendBiM(..), instanceDescendBiM, instanceDescendBiMT,
+    DescendM(..), descend, instanceDescendM, instanceDescendMT,
     ) where
 import Control.Monad
 import Control.Exception(assert)
 import Control.Monad.State.Strict
+import Control.Monad.Identity
 import Data.Maybe
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax hiding (lift)
-import System.IO
+--import System.IO
 
 ---- Overloaded interface, same as Uniplate.
 
@@ -29,6 +32,14 @@ class TransformBi s t where
 class {-(Monad m) => -} TransformBiM m s t where
     transformBiM :: (s -> m s) -> t -> m t
 
+-- | Class for 'descendBiM'.
+class {-(Monad m) => -} DescendBiM m s t where
+    descendBiM :: (s -> m s) -> t -> m t
+
+-- | Class for 'descendM'.
+class {-(Monad m) => -} DescendM m t where
+    descendM :: (t -> m t) -> t -> m t
+
 universe :: (UniverseBi a a) => a -> [a]
 universe = universeBi
 
@@ -37,6 +48,9 @@ transform = transformBi
 
 transformM :: (TransformBiM m a a) => (a -> m a) -> a -> m a
 transformM = transformBiM
+
+descend :: (DescendM Identity a) => (a -> a) -> (a -> a)
+descend f = runIdentity . descendM (return . f)
 
 ----
 
@@ -79,18 +93,47 @@ instanceTransformBi = instanceTransformBiT []
 instanceTransformBiT :: [TypeQ]      -- ^types not touched by 'transformBi'
                      -> TypeQ        -- ^(inner, outer) types
                      -> Q [Dec]
-instanceTransformBiT stops ty = instanceTransformBiT' stops =<< ty
+instanceTransformBiT stops ty = instanceTransformBiT' MTransformBi stops =<< ty
 
-instanceTransformBiT' :: [TypeQ] -> Type -> Q [Dec]
-instanceTransformBiT' stops (ForallT _ _ t) = instanceTransformBiT' stops t
-instanceTransformBiT' stops ty | (TupleT _, [ft, st]) <- splitTypeApp ty = do
+data Mode = MTransformBi | MDescendBi | MDescend
+    deriving (Eq, Ord, Show)
+
+instanceTransformBiT' :: Mode -> [TypeQ] -> Type -> Q [Dec]
+instanceTransformBiT' doDescend stops (ForallT _ _ t) = instanceTransformBiT' doDescend stops t
+instanceTransformBiT' doDescend stops ty | (TupleT _, [ft, st]) <- splitTypeApp ty = do
     f <- newName "_f"
     x <- newName "_x"
-    (ds, tr) <- trBiQ raNormal stops f ft st
+    (ds, tr) <- trBiQ doDescend raNormal stops f ft st
     let e = LamE [VarP f, VarP x] $ LetE ds $ AppE tr (VarE x)
 
     return $ instDef ''TransformBi [ft, st] 'transformBi e
-instanceTransformBiT' _ t = genError "instanceTransformBiT: the argument should be of the form [t| (S, T) |]"
+instanceTransformBiT' _ _ t = genError "instanceTransformBiT: the argument should be of the form [t| (S, T) |]"
+
+-- | Create a 'DescendBiM' instance.
+instanceDescendM :: TypeQ
+                     -> TypeQ
+                     -> Q [Dec]
+instanceDescendM = instanceDescendMT []
+
+-- | Create a 'DescendBiM' instance with certain types being abstract.
+instanceDescendMT :: [TypeQ]
+                      -> TypeQ
+                      -> TypeQ
+                      -> Q [Dec]
+instanceDescendMT stops mndq ty = instanceTransformBiMT' MDescend stops mndq =<< ty
+
+-- | Create a 'DescendBiM' instance.
+instanceDescendBiM :: TypeQ
+                     -> TypeQ
+                     -> Q [Dec]
+instanceDescendBiM = instanceDescendBiMT []
+
+-- | Create a 'DescendBiM' instance with certain types being abstract.
+instanceDescendBiMT :: [TypeQ]
+                      -> TypeQ
+                      -> TypeQ
+                      -> Q [Dec]
+instanceDescendBiMT stops mndq ty = instanceTransformBiMT' MDescendBi stops mndq =<< ty
 
 -- | Create a 'TransformBiM' instance.
 instanceTransformBiM :: TypeQ
@@ -103,20 +146,30 @@ instanceTransformBiMT :: [TypeQ]
                       -> TypeQ
                       -> TypeQ
                       -> Q [Dec]
-instanceTransformBiMT stops mndq ty = instanceTransformBiMT' stops mndq =<< ty
+instanceTransformBiMT stops mndq ty = instanceTransformBiMT' MTransformBi stops mndq =<< ty
 
-instanceTransformBiMT' :: [TypeQ] -> TypeQ -> Type -> Q [Dec]
-instanceTransformBiMT' stops mndq (ForallT _ _ t) = instanceTransformBiMT' stops mndq t
-instanceTransformBiMT' stops mndq ty | (TupleT _, [ft, st]) <- splitTypeApp ty = do
+instanceTransformBiMT' :: Mode -> [TypeQ] -> TypeQ -> Type -> Q [Dec]
+instanceTransformBiMT' doDescend stops mndq (ForallT _ _ t) = instanceTransformBiMT' doDescend stops mndq t
+instanceTransformBiMT'  MDescend stops mndq ty = do
     mnd <- mndq
 
     f <- newName "_f"
     x <- newName "_x"
-    (ds, tr) <- trBiQ raMonad stops f ft st
+    (ds, tr) <- trBiQ MDescend raMonad stops f ty ty
     let e = LamE [VarP f, VarP x] $ LetE ds $ AppE tr (VarE x)
+    return $ instDef ''DescendM [mnd, ty] 'descendM e
+instanceTransformBiMT' doDescend stops mndq ty | (TupleT _, [ft, st]) <- splitTypeApp ty = do
+--    qRunIO $ do putStrLn "************"; hFlush stdout
+    mnd <- mndq
 
-    return $ instDef ''TransformBiM [mnd, ft, st] 'transformBiM e
-instanceTransformBiMT' _ _ t = genError "instanceTransformBiMT: the argument should be of the form [t| (S, T) |]"
+    f <- newName "_f"
+    x <- newName "_x"
+    (ds, tr) <- trBiQ doDescend raMonad stops f ft st
+    let e = LamE [VarP f, VarP x] $ LetE ds $ AppE tr (VarE x)
+        cls = case doDescend of MTransformBi -> ''TransformBiM; MDescendBi -> ''DescendBiM; MDescend -> error "MDescend"
+        met = case doDescend of MTransformBi ->  'transformBiM; MDescendBi ->  'descendBiM; MDescend -> error "MDescend"
+    return $ instDef cls [mnd, ft, st] met e
+instanceTransformBiMT' _ _ _ t = genError "instanceTransformBiMT: the argument should be of the form [t| (S, T) |]"
 
 
 -- | Generate TH code for a function that extracts all subparts of a certain type.
@@ -139,6 +192,7 @@ genUniverseBiT stops = getNameType >=> genUniverseBiTsplit stops
 genUniverseBiT' :: [TypeQ] -> TypeQ -> Q Exp
 genUniverseBiT' stops q = q >>= splitType >>= genUniverseBiTsplit stops
 
+genUniverseBiTsplit :: [TypeQ] -> ([TyVarBndr], Type, Type) -> Q Exp
 genUniverseBiTsplit stops (_tvs,from,tos) = do
     let to = unList tos
 --    qRunIO $ print (from, to)
@@ -155,16 +209,25 @@ instance Quasi U where
     qReport b = lift . qReport b
     qRecover = error "Data.Generics.Geniplate: qRecover not implemented"
     qReify = lift . qReify
-#if MIN_VERSION_template_haskell(2,7,0)
+#if __GLASGOW_HASKELL__ >= 706
     qReifyInstances n = lift . qReifyInstances n
-#elif MIN_VERSION_template_haskell(2,5,0)
+#elif __GLASGOW_HASKELL__ >= 702
     qClassInstances n = lift . qClassInstances n
 #endif
     qLocation = lift qLocation
     qRunIO = lift . qRunIO
-#if MIN_VERSION_template_haskell(2,7,0)
+#if __GLASGOW_HASKELL__ >= 706
     qLookupName ns = lift . qLookupName ns
     qAddDependentFile = lift . qAddDependentFile
+#if __GLASGOW_HASKELL__ >= 708
+    qReifyRoles = lift . qReifyRoles
+    qReifyAnnotations = lift . qReifyAnnotations
+    qReifyModule = lift . qReifyModule
+    qAddTopDecls = lift . qAddTopDecls
+    qAddModFinalizer = lift . qAddModFinalizer
+    qGetQ = undefined -- lift . qGetQ
+    qPutQ = lift . qPutQ
+#endif
 #endif
 
 uniBiQ :: [TypeQ] -> Type -> Type -> Q ([Dec], Exp)
@@ -427,113 +490,135 @@ raMonad = (eret, eap, emap)
 type RetAp = (Exp -> Exp, Exp -> Exp -> Exp, Exp -> Exp -> Exp)
 
 transformBiG :: RetAp -> [TypeQ] -> Name -> Q Exp
-transformBiG ra stops = getNameType >=> transformBiGsplit ra stops
+transformBiG ra stops = getNameType >=> transformBiGsplit MTransformBi ra stops
 
 transformBiG' :: RetAp -> [TypeQ] -> TypeQ -> Q Exp
-transformBiG' ra stops q = q >>= splitType >>= transformBiGsplit ra stops
+transformBiG' ra stops q = q >>= splitType >>= transformBiGsplit MTransformBi ra stops
 
-transformBiGsplit ra stops (_tvs,fcn,res) = do
+transformBiGsplit :: Mode -> RetAp -> [TypeQ] -> (t, Type, Type) -> Q Exp
+transformBiGsplit doDescend ra stops (_tvs,fcn,res) = do
     f <- newName "_f"
     x <- newName "_x"
     (ds, tr) <-
         case (fcn, res) of
-            (AppT (AppT ArrowT s) s',          AppT (AppT ArrowT t) t')           | s == s' && t == t'            -> trBiQ ra stops f s t
-            (AppT (AppT ArrowT s) (AppT m s'), AppT (AppT ArrowT t) (AppT m' t')) | s == s' && t == t' && m == m' -> trBiQ ra stops f s t
+            (AppT (AppT ArrowT s) s',          AppT (AppT ArrowT t) t')           | s == s' && t == t'            -> trBiQ doDescend ra stops f s t
+            (AppT (AppT ArrowT s) (AppT m s'), AppT (AppT ArrowT t) (AppT m' t')) | s == s' && t == t' && m == m' -> trBiQ doDescend ra stops f s t
             _ -> genError $ "transformBi: malformed type: " ++ pprint (AppT (AppT ArrowT fcn) res) ++ ", should have form (S->S) -> (T->T)"
     let e = LamE [VarP f, VarP x] $ LetE ds $ AppE tr (VarE x)
 --    qRunIO $ do putStrLn $ pprint e; hFlush stdout
     return e
 
-trBiQ :: RetAp -> [TypeQ] -> Name -> Type -> Type -> Q ([Dec], Exp)
-trBiQ ra stops f aft st = do
+trBiQ :: Mode -> RetAp -> [TypeQ] -> Name -> Type -> Type -> Q ([Dec], Exp)
+trBiQ doDescend ra stops f aft st = do
     ss <- sequence stops
     ft <- expandSyn aft
-    (tr, (m, _)) <- runStateT (trBi ra (VarE f) ft st) (mEmpty, mFromList $ zip ss (repeat False))
+    (tr, (m, _)) <- runStateT (trBi False doDescend ra (VarE f) ft st) (mEmpty, mFromList $ zip ss (repeat False))
     return (mElems m, tr)
 
-arrow :: Type -> Type -> Type
-arrow t1 t2 = AppT (AppT ArrowT t1) t2
+--arrow :: Type -> Type -> Type
+--arrow t1 t2 = AppT (AppT ArrowT t1) t2
 
-trBi :: RetAp -> Exp -> Type -> Type -> U Exp
-trBi ra@(ret, _, rbind) f ft ast = do
+trBi :: Bool -> Mode -> RetAp -> Exp -> Type -> Type -> U Exp
+--trBi True DescendBiM (ret, _, _) _ _ _ = return ret
+trBi seenStop doDescend ra@(ret, _, rbind) f ft ast = do
+--    qRunIO $ do print (seenStop, doDescend, ft, ast); hFlush stdout
     (m, c) <- get
     st <- expandSyn ast
 --    qRunIO $ print (ft, st)
+{-
+    if ft == st && seenStop && doDescend == MDescend then
+      return f
+     else
+-}
     case mLookup st m of
-        Just (FunD n _) -> return $ VarE n
+        Just (FunD n _) -> do
+--            qRunIO $ print ("found", ft == st, seenStop, doDescend == MDescend)
+            if doDescend == MDescend && ft == st then
+                return f
+             else
+                return $ VarE n
         _ -> do
             tr <- qNewName "_tr"
-            let mkRec = do
+            let mkRec same = do
+--                    qRunIO $ do putStrLn $ "mkRec " ++ show (same, tr); hFlush stdout
                     put (mInsert st (FunD tr [Clause [] (NormalB $ TupE []) []]) m, c)  -- insert something to break recursion, will be replaced below.
-                    trBiCase ra f ft st
+                    trBiCase same doDescend ra f ft st
 
             cs <- if ft == st then do
                       b <- contains' ft st
+--                      qRunIO $ do print ("equal", b, doDescend == MDescend, seenStop); hFlush stdout
                       if b then do
+--                          qRunIO $ do putStrLn "create g"; hFlush stdout
                           g <- qNewName "_g"
-                          gcs <- mkRec
+                          gcs <- mkRec True
                           let dg = FunD g gcs
                           -- Insert with a dummy type, just to get the definition in the map for mElems.
                           modify $ \ (m', c') -> (mInsert (ConT g) dg m', c')
                           x <- qNewName "_x"
-                          return [Clause [VarP x] (NormalB $ rbind f (AppE (VarE g) (VarE x))) []]
+                          let f' = if doDescend == MDescend then id else rbind f
+                          return [Clause [VarP x] (NormalB $ f' (AppE (VarE g) (VarE x))) []]
                        else do
+--                          qRunIO $ do putStrLn "call f"; hFlush stdout
                           x <- qNewName "_x"
                           return [Clause [VarP x] (NormalB $ AppE f (VarE x)) []]
                   else do
                       b <- contains ft st
 --                      qRunIO $ print (b, ft, st)
                       if b then do
-                          mkRec
+                          mkRec False
                        else do
                           x <- qNewName "_x"
                           return [Clause [VarP x] (NormalB $ ret $ VarE x) []]
             let d = FunD tr cs
-            modify $ \ (m', c') -> (mInsert st d m', c')
+            modify $ \ (m', c') -> (mInsert st d m', c')  -- overwrite dummy binding from mkRec
             return $ VarE tr
 
-trBiCase :: RetAp -> Exp -> Type -> Type -> U [Clause]
-trBiCase ra f ft st = do
+trBiCase :: Bool -> Mode -> RetAp -> Exp -> Type -> Type -> U [Clause]
+trBiCase seenStop doDescend ra f ft st = do
     let (con, ts) = splitTypeApp st
     case con of
-        ConT n    -> trBiCon ra f n ft st ts
-        TupleT _  -> trBiTuple ra f ft st ts
+        ConT n    -> trBiCon seenStop doDescend ra f n ft st ts
+        TupleT _  -> trBiTuple seenStop doDescend ra f ft st ts
 --        ArrowT    -> unFun [d| f _ _r = _r |]           -- Stop at functions
-        ListT     -> trBiList ra f ft st (head ts)
+        ListT     -> trBiList seenStop doDescend ra f ft st (head ts)
         _         -> genError $ "trBiCase: unexpected type: " ++ pprint st ++ " (" ++ show st ++ ")"
 
-trBiList :: RetAp -> Exp -> Type -> Type -> Type -> U [Clause]
-trBiList ra f ft st et = do
-    nil <- trMkArm ra f ft st [] (const $ ListP []) (ListE []) []
-    cons <- trMkArm ra f ft st [] (ConP '(:)) (ConE '(:)) [et, st]
+trBiList :: Bool -> Mode -> RetAp -> Exp -> Type -> Type -> Type -> U [Clause]
+trBiList seenStop doDescend ra f ft st et = do
+    nil <- trMkArm seenStop doDescend ra f ft st [] (const $ ListP []) (ListE []) []
+    cons <- trMkArm seenStop doDescend ra f ft st [] (ConP '(:)) (ConE '(:)) [et, st]
     return [nil, cons]
 
-trBiTuple :: RetAp -> Exp -> Type -> Type -> [Type] -> U [Clause]
-trBiTuple ra f ft st ts = do
+trBiTuple :: Bool -> Mode -> RetAp -> Exp -> Type -> Type -> [Type] -> U [Clause]
+trBiTuple seenStop doDescend ra f ft st ts = do
     vs <- mapM (const $ qNewName "_t") ts
     let tupE = LamE (map VarP vs) $ TupE (map VarE vs)
-    c <- trMkArm ra f ft st [] TupP tupE ts
+    c <- trMkArm seenStop doDescend ra f ft st [] TupP tupE ts
     return [c]
 
-trBiCon :: RetAp -> Exp -> Name -> Type -> Type -> [Type] -> U [Clause]
-trBiCon ra f con ft st ts = do
+trBiCon :: Bool -> Mode -> RetAp -> Exp -> Name -> Type -> Type -> [Type] -> U [Clause]
+trBiCon seenStop doDescend ra f con ft st ts = do
     (tvs, cons) <- getTyConInfo con
     let genArm (NormalC c xs) = arm (ConP c) (ConE c) xs
         genArm (InfixC x1 c x2) = arm (\ [p1, p2] -> InfixP p1 c p2) (ConE c) [x1, x2]
         genArm (RecC c xs) = arm (ConP c) (ConE c) [ (b,t) | (_,b,t) <- xs ]
         genArm c = genError $ "trBiCon: " ++ show c
         s = mkSubst tvs ts
-        arm c ec xs = trMkArm ra f ft st s c ec $ map snd xs
+        arm c ec xs = trMkArm seenStop doDescend ra f ft st s c ec $ map snd xs
     mapM genArm cons
 
-trMkArm :: RetAp -> Exp -> Type -> Type -> Subst -> ([Pat] -> Pat) -> Exp -> [Type] -> U Clause
-trMkArm ra@(ret, apl, _) f ft st s c ec ts = do
+trMkArm :: Bool -> Mode -> RetAp -> Exp -> Type -> Type -> Subst -> ([Pat] -> Pat) -> Exp -> [Type] -> U Clause
+trMkArm seenStop doDescend ra@(ret, apl, _) f ft st s c ec ts = do
     vs <- mapM (const $ qNewName "_x") ts
     let sub v t = do
-            let t' = subst s t
-            tr <- trBi ra f ft t'
-            return $ AppE tr (VarE v)
-        conTy = foldr arrow st (map (subst s) ts)
+--            qRunIO $ print ("put", seenStop, doDescend, ft == st)
+            if seenStop && doDescend == MDescendBi then do
+                return $ ret (VarE v)
+            else do
+                let t' = subst s t
+                tr <- trBi seenStop doDescend ra f ft t'
+                return $ AppE tr (VarE v)
+--        conTy = foldr arrow st (map (subst s) ts)
     es <- zipWithM sub vs ts
     let body = foldl apl (ret ec) es
     return $ Clause [c (map VarP vs)] (NormalB body) []
